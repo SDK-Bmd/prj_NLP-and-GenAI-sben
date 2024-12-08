@@ -1,0 +1,37 @@
+# Environment variables
+.env
+.env.local
+.env.*
+
+# Virtual Environment
+venv/
+ENV/
+env/
+.venv/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+.DS_Store
+
+# Jupyter Notebook
+.ipynb_checkpoints
+
+# Logs
+*.log
+
+# Local development settings
+instance/
+.webassets-cache
+
+# Database
+*.db
+*.sqlite3
+
+# Docker
+docker-compose.override.yml
+
+# Model files and data
+meta_Cell_Phones_and_Accessories.jsonl

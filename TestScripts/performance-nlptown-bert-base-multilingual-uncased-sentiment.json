@@ -1,0 +1,8 @@
+{
+    "model name": "nlptown/bert-base-multilingual-uncased-sentiment",
+    "Pearson Correlation": 0.816766869501309,
+    "Mean Squared Error (MSE)": 0.676,
+    "Mean Absolute Error (MAE)": 0.434,
+    "R^2 Score": 0.6093332370150979,
+    "Precision (Macro)": 0.516990044985526
+}

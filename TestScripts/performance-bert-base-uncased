@@ -1,0 +1,7 @@
+{
+    "model name": "bert-base-uncased",
+    "Pearson Correlation": 0.039409783965269854,
+    "Mean Squared Error (MSE)": 8.3,
+    "Mean Absolute Error (MAE)": 2.662,
+    "R^2 Score": -3.7966481254063424
+}

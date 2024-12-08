@@ -1,0 +1,7 @@
+{
+    "model name": "distilbert-base-uncased-finetuned-sst-2-english",
+    "Pearson Correlation": 0.6545515897316961,
+    "Mean Squared Error (MSE)": 7.351,
+    "Mean Absolute Error (MAE)": 2.493,
+    "R^2 Score": -3.2482120927544607
+}

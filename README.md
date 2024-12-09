@@ -50,13 +50,12 @@ python -m spacy download en_core_web_sm
 pip install weaviate-client openai python-dotenv
 ```
 
-[Previous sections remain the same until Installation]
 
 ## 🔧 Installation
 
 1. Clonez le dépôt :
 ```bash
-git clone <url-de-votre-depot>
+git clone https://github.com/SDK-Bmd/prj_NLP-and-GenAI-sben.git
 cd amazon-analysis-projects
 ```
 
@@ -165,7 +164,6 @@ streamlit run archi_REG.py
    - Vectorisation (TF-IDF ou embeddings)
 2. **Analyse** :
    - Clustering (KMeans/DBSCAN)
-   - NER
    - Analyse de sentiment
 3. **Visualisation** :
    - Graphiques de clusters

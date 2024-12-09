@@ -190,15 +190,35 @@ def process_and_embed_data(uploaded_file):
 @st.cache_resource
 def initialize_weaviate_client():
     """
-    Initialize and return a Weaviate client.
+    Initialize and return a Weaviate client with connection verification.
 
     Returns:
     --------
     Client
         A configured Weaviate client
+
+    Raises:
+    -------
+    ConnectionError
+        If unable to connect to Weaviate server
     """
     weaviate_url = os.getenv("WEAVIATE_URL", "http://localhost:8080")
-    return Client(weaviate_url)
+    client = Client(weaviate_url)
+
+    # Verify connection
+    try:
+        # Check if server is ready
+        if not client.is_ready():
+            raise ConnectionError("Weaviate server is not ready")
+
+        # Try to get meta info to verify connection
+        client.get_meta()
+        logging.info(f"Successfully connected to Weaviate at {weaviate_url}")
+        return client
+    except Exception as e:
+        error_msg = f"Failed to connect to Weaviate at {weaviate_url}: {str(e)}"
+        logging.error(error_msg)
+        raise ConnectionError(error_msg)
 
 
 def setup_weaviate_schema(client):
@@ -278,6 +298,49 @@ def add_data_to_weaviate(client, class_name, embeddings, texts, batch_size=100):
                 logging.error(f"Error inserting batch {i // batch_size + 1}: {e}")
 
 
+def query_weaviate(client, class_name, query_embedding, limit=5):
+    """
+    Query Weaviate for similar documents.
+
+    Parameters:
+    -----------
+    client : Client
+        The Weaviate client
+    class_name : str
+        The name of the Weaviate class to query
+    query_embedding : list
+        The vector embedding of the query
+    limit : int, optional
+        Number of results to return (default: 5)
+
+    Returns:
+    --------
+    list
+        A list of retrieved text documents
+    """
+    try:
+        results = (
+            client.query
+            .get(class_name, ["text"])
+            .with_near_vector({"vector": query_embedding})
+            .with_limit(limit)
+            .do()
+        )
+
+        # Handle the response structure correctly
+        if results and "data" in results:
+            # Access the correct path in the response
+            class_results = results["data"]["Get"][class_name]
+            return [item["text"] for item in class_results]
+        else:
+            logging.warning("No results found or unexpected response structure")
+            return []
+
+    except Exception as e:
+        logging.error(f"Error querying Weaviate: {e}")
+        return []
+
+
 def ask_llm(documents, question, temperature=0.7, top_p=0.9):
     """
     Query a Large Language Model (LLM) with retrieved documents and a user question.
@@ -327,8 +390,7 @@ def ask_llm(documents, question, temperature=0.7, top_p=0.9):
 
 def main():
     """
-    Main Streamlit application function that orchestrates the entire RAG workflow.
-    Handles file upload, amazon_data processing, vector search, and LLM querying.
+    Main Streamlit application function with updated query handling.
     """
     st.title("RAG System for Product Descriptions")
     st.write("Upload a `.jsonl` file to get started!")
@@ -339,24 +401,27 @@ def main():
         st.warning("Please upload a .jsonl file to proceed.")
         return
 
-    # Process amazon_data and generate embeddings (cached)
-    with st.spinner("Processing amazon_data..."):
+    # Process data and generate embeddings (cached)
+    with st.spinner("Processing data..."):
         try:
-            # Process amazon_data with caching
             processed_data, embeddings, model = process_and_embed_data(uploaded_file)
             st.success("Data processed successfully!")
         except Exception as e:
-            st.error(f"Error processing amazon_data: {e}")
+            st.error(f"Error processing data: {e}")
             return
 
     # Initialize Weaviate client
-    client = initialize_weaviate_client()
+    try:
+        client = initialize_weaviate_client()
+    except Exception as e:
+        st.error(f"Error connecting to Weaviate: {e}")
+        return
 
-    # Set up schema and add amazon_data to Weaviate
+    # Set up schema and add data
     class_name = setup_weaviate_schema(client)
     add_data_to_weaviate(client, class_name, embeddings, processed_data)
 
-    st.write("Ask questions about the amazon_data!")
+    st.write("Ask questions about the data!")
 
     # User input for question
     question = st.text_input("Enter your question:")
@@ -369,19 +434,16 @@ def main():
         # Encode the question
         query_embedding = model.encode(question).tolist()
 
-        # Retrieve documents from Weaviate
-        results = (
-            client.query.get(class_name, ["text"])
-            .with_near_vector({"vector": query_embedding})
-            .with_limit(5)
-            .do()
-        )
-        documents = [item["text"] for item in results["amazon_data"]["Get"][class_name]]
+        # Retrieve documents using the new query function
+        documents = query_weaviate(client, class_name, query_embedding)
 
-        # Call LLM with retrieved documents
-        response = ask_llm("\n".join(documents), question, temperature, top_p)
-        st.write("Response:")
-        st.write(response)
+        if documents:
+            # Call LLM with retrieved documents
+            response = ask_llm("\n".join(documents), question, temperature, top_p)
+            st.write("Response:")
+            st.write(response)
+        else:
+            st.warning("No relevant documents found for your question.")
 
 
 # Run the Streamlit app

@@ -339,11 +339,52 @@ def predict_sentiments(dataloader, model, device):
     return predictions
 
 
+def calculate_metrics(true_ratings, predicted_ratings):
+    """
+    Calculate various metrics for sentiment analysis evaluation.
+
+    Args:
+        true_ratings: List of true ratings
+        predicted_ratings: List of predicted ratings
+
+    Returns:
+        dict: Dictionary containing various metrics
+    """
+    metrics = {}
+
+    # Calculate Pearson correlation and p-value
+    correlation, p_value = pearsonr(true_ratings, predicted_ratings)
+    metrics['pearson_correlation'] = correlation
+    metrics['pearson_p_value'] = p_value
+
+    # Calculate precision metrics
+    true_array = np.array(true_ratings)
+    pred_array = np.array(predicted_ratings)
+
+    # Exact match precision
+    exact_matches = np.sum(true_array == pred_array)
+    metrics['exact_precision'] = exact_matches / len(true_array)
+
+    # Within 1-point precision
+    within_one = np.sum(np.abs(true_array - pred_array) <= 1)
+    metrics['within_one_precision'] = within_one / len(true_array)
+
+    # Mean Absolute Error
+    mae = np.mean(np.abs(true_array - pred_array))
+    metrics['mae'] = mae
+
+    # Root Mean Square Error
+    rmse = np.sqrt(np.mean((true_array - pred_array) ** 2))
+    metrics['rmse'] = rmse
+
+    return metrics
+
+
 # Streamlit UI
-st.title("Enhanced NLP Analysis Workflow")
+st.title("NLP Analysis")
 st.sidebar.header("Upload Datasets")
 uploaded_files = st.sidebar.file_uploader(
-    "Choose JSONL files (reviews.jsonl and meta.jsonl)",
+    "Choose JSONL files (reviews.jsonl)",
     type="jsonl",
     accept_multiple_files=True
 )
@@ -352,10 +393,10 @@ if uploaded_files:
     reviews = load_jsonl(uploaded_files)
     st.success(f"Loaded {len(reviews)} reviews successfully.")
 
-    tabs = st.tabs(["Preprocessing", "Clustering", "NER", "Sentiment Analysis"])
+    tabs = st.tabs(["Preprocessing", "Clustering", "Sentiment Analysis"])
 
     # Initialize session state
-    for key in ["preprocessed_reviews", "clustering_results", "ner_results", "sentiment_results"]:
+    for key in ["preprocessed_reviews", "clustering_results", "sentiment_results"]:
         if key not in st.session_state:
             st.session_state[key] = None
 
@@ -508,137 +549,197 @@ if uploaded_files:
                             columns=["Entity (Type)", "Count"]
                         ))
 
-    # NER Tab
-    with tabs[2]:
-        st.header("Step 3: Named Entity Recognition")
-        ner_model = st.selectbox("NER Model", ["spaCy", "Transformers"])
+    # Sentiment Analysis Tab
+    with tabs[2]:  # Note: Changed from tabs[2] to tabs[3] since it's the fourth tab
+        st.header("Step 4: Sentiment Analysis")
 
-        if st.button("Execute NER"):
-            if st.session_state.preprocessed_reviews:
-                with st.spinner("Performing Named Entity Recognition..."):
-                    corpus = [
-                        " ".join(doc["text"])
-                        for doc in st.session_state.preprocessed_reviews
-                    ]
+        if st.button("Execute Sentiment Analysis"):
+            if not st.session_state.preprocessed_reviews:
+                st.warning("Please execute preprocessing first.")
+            else:
+                try:
+                    with st.spinner("Loading sentiment analysis model..."):
+                        # Load model and tokenizer
+                        sentiment_model, sentiment_tokenizer = load_sentiment_model()
 
-                    if ner_model == "spaCy":
-                        st.session_state.ner_results = [
-                            {
-                                "text": doc,
-                                "entities": [
-                                    {
-                                        "text": ent.text,
-                                        "label": ent.label_,
-                                        "start": ent.start_char,
-                                        "end": ent.end_char
-                                    }
-                                    for ent in nlp(doc).ents
-                                ]
-                            }
-                            for doc in corpus
-                        ]
-                    else:
-                        # Add missing parts for NER and Sentiment Analysis tabs
+                        # Prepare data
+                        texts = [" ".join(review["text"]) for review in
+                                 st.session_state.preprocessed_reviews]
+                        true_ratings = [review.get("rating") for review in reviews]
+                        true_ratings = [r for r in true_ratings if
+                                        r is not None]  # Filter out None values
 
-                        # NER Tab (continuation)
-                        ner_pipeline = pipeline(
-                            "ner",
-                            model="dbmdz/bert-large-cased-finetuned-conll03-english"
-                        )
-                        st.session_state.ner_results = []
-                        for doc in corpus:
-                            entities = ner_pipeline(doc)
-                            st.session_state.ner_results.append({
-                                "text": doc,
-                                "entities": entities
-                            })
+                        # Set up device
+                        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+                        st.info(f"Using device: {device}")
+                        sentiment_model.to(device)
 
-                        # Display NER results
-                    if st.session_state.ner_results:
-                        for idx, result in enumerate(st.session_state.ner_results[:5]):  # Show first 5 for brevity
-                            with st.expander(f"Document {idx + 1}"):
-                                st.write("Text:", result["text"][:200] + "...")  # Show truncated text
-                                st.write("Entities:")
-                                if result["entities"]:
-                                    entities_df = pd.DataFrame(result["entities"])
-                                    st.dataframe(entities_df)
-                                else:
-                                    st.write("No entities found")
-                    else:
-                        st.warning("Please execute preprocessing first.")
+                        # Create dataset and dataloader
+                        try:
+                            with st.spinner("Processing reviews..."):
+                                dataset = ReviewDataset(texts, sentiment_tokenizer)
+                                dataloader = DataLoader(dataset, batch_size=8, shuffle=False)
 
-                        # Sentiment Analysis Tab
-                    with tabs[3]:
-                        st.header("Step 4: Sentiment Analysis")
+                                # Get predictions
+                                predicted_ratings = predict_sentiments(dataloader, sentiment_model,
+                                                                       device)
 
-                        if st.button("Execute Sentiment Analysis"):
-                            if st.session_state.preprocessed_reviews:
-                                with st.spinner("Performing sentiment analysis..."):
-                                    # Load model and tokenizer
-                                    sentiment_model, sentiment_tokenizer = load_sentiment_model()
+                                # Store results in session state
+                                st.session_state.sentiment_results = {
+                                    "texts": texts,
+                                    "predicted_ratings": predicted_ratings,
+                                    "true_ratings": true_ratings if true_ratings else None
+                                }
 
-                                    # Prepare amazon_data
-                                    texts = [" ".join(review["text"]) for review in
-                                             st.session_state.preprocessed_reviews]
-                                    true_ratings = [review["rating"] for review in reviews if "rating" in review]
+                                if true_ratings and len(true_ratings) == len(predicted_ratings):
+                                    metrics = calculate_metrics(true_ratings, predicted_ratings)
 
-                                    # Set up device
-                                    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-                                    sentiment_model.to(device)
+                                    st.write("### Analysis Metrics")
 
-                                    # Create dataset and dataloader
-                                    dataset = ReviewDataset(texts, sentiment_tokenizer)
-                                    dataloader = DataLoader(dataset, batch_size=8, shuffle=False)
+                                    # Create three columns for metrics display
+                                    col1, col2, col3 = st.columns(3)
 
-                                    # Get predictions
-                                    predicted_ratings = predict_sentiments(dataloader, sentiment_model, device)
+                                    with col1:
+                                        st.metric(
+                                            "Pearson Correlation",
+                                            f"{metrics['pearson_correlation']:.3f}",
+                                            help="Correlation between true and predicted ratings (-1 to 1)"
+                                        )
+                                        st.metric(
+                                            "P-value",
+                                            f"{metrics['pearson_p_value']:.3e}",
+                                            help="Statistical significance of correlation"
+                                        )
 
-                                    # Calculate correlation if true ratings exist
-                                    correlation = None
-                                    if true_ratings:
-                                        correlation, p_value = pearsonr(true_ratings, predicted_ratings)
+                                    with col2:
+                                        st.metric(
+                                            "Exact Precision",
+                                            f"{metrics['exact_precision']:.2%}",
+                                            help="Percentage of exactly matching predictions"
+                                        )
+                                        st.metric(
+                                            "Within ±1 Precision",
+                                            f"{metrics['within_one_precision']:.2%}",
+                                            help="Percentage of predictions within 1 point of true rating"
+                                        )
 
-                                    st.session_state.sentiment_results = {
-                                        "true_ratings": true_ratings,
-                                        "predicted_ratings": predicted_ratings,
-                                        "correlation": correlation
-                                    }
+                                    with col3:
+                                        st.metric(
+                                            "Mean Absolute Error",
+                                            f"{metrics['mae']:.2f}",
+                                            help="Average absolute difference between true and predicted ratings"
+                                        )
+                                        st.metric(
+                                            "Root Mean Square Error",
+                                            f"{metrics['rmse']:.2f}",
+                                            help="Root mean square error of predictions"
+                                        )
 
-                                    # Display results
-                                    if correlation:
-                                        st.metric("Pearson Correlation", f"{correlation:.3f}")
+                                    # Add a detailed correlation interpretation
+                                    st.write("### Correlation Interpretation")
+                                    corr = metrics['pearson_correlation']
+                                    if abs(corr) > 0.7:
+                                        strength = "strong"
+                                    elif abs(corr) > 0.3:
+                                        strength = "moderate"
+                                    else:
+                                        strength = "weak"
+
+                                    direction = "positive" if corr > 0 else "negative"
+
+                                    st.info(
+                                        f"The model shows a {strength} {direction} correlation "
+                                        f"({corr:.3f}) with the true ratings. "
+                                        f"The p-value is {metrics['pearson_p_value']:.3e}, "
+                                        f"{'indicating statistical significance' if metrics['pearson_p_value'] < 0.05 else 'suggesting the correlation might not be statistically significant'}."
+                                    )
 
                                     # Plotting
-                                    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(15, 6))
+                                    fig, ax = plt.subplots(figsize=(12, 6))
 
-                                    # Distribution of predicted ratings
-                                    sns.histplot(predicted_ratings, bins=5, ax=ax1)
-                                    ax1.set_title("Distribution of Predicted Ratings")
-                                    ax1.set_xlabel("Rating")
-                                    ax1.set_ylabel("Count")
+                                    # Plot both distributions
+                                    if true_ratings and len(true_ratings) == len(predicted_ratings):
+                                        # Create the distributions plot
+                                        sns.kdeplot(data=true_ratings, label='True Ratings',
+                                                    color='blue', alpha=0.6)
+                                        sns.kdeplot(data=predicted_ratings, label='Predicted Ratings',
+                                                    color='red', alpha=0.6)
 
-                                    # True vs Predicted ratings if available
-                                    if true_ratings:
-                                        ax2.scatter(true_ratings, predicted_ratings, alpha=0.5)
-                                        ax2.set_title("True vs Predicted Ratings")
-                                        ax2.set_xlabel("True Rating")
-                                        ax2.set_ylabel("Predicted Rating")
-                                        # Add perfect prediction line
-                                        min_val = min(min(true_ratings), min(predicted_ratings))
-                                        max_val = max(max(true_ratings), max(predicted_ratings))
-                                        ax2.plot([min_val, max_val], [min_val, max_val], 'r--', alpha=0.5)
+                                        # Add histograms with transparency
+                                        plt.hist(true_ratings, bins=5, color='blue', alpha=0.3,
+                                                 density=True, label='True Ratings (Histogram)')
+                                        plt.hist(predicted_ratings, bins=5, color='red', alpha=0.3,
+                                                 density=True, label='Predicted Ratings (Histogram)')
 
+                                        plt.title("Distribution of True vs Predicted Ratings")
+                                        plt.xlabel("Rating")
+                                        plt.ylabel("Density")
+                                        plt.legend()
+
+                                        # Add mean lines
+                                        true_mean = np.mean(true_ratings)
+                                        pred_mean = np.mean(predicted_ratings)
+                                        plt.axvline(x=true_mean, color='blue', linestyle='--',
+                                                    alpha=0.5, label=f'True Mean: {true_mean:.2f}')
+                                        plt.axvline(x=pred_mean, color='red', linestyle='--',
+                                                    alpha=0.5, label=f'Predicted Mean: {pred_mean:.2f}')
+
+                                        # Update legend with mean values
+                                        plt.legend(title="Rating Distributions")
+
+                                    else:
+                                        plt.text(0.5, 0.5, 'No true ratings available for comparison',
+                                                 ha='center', va='center')
+                                        plt.title("Ratings Comparison Not Available")
+
+                                    plt.tight_layout()
                                     st.pyplot(fig)
 
-                                    # Show detailed results
-                                    results_df = pd.DataFrame({
-                                        'Text': texts[:10],  # Show first 10 for brevity
-                                        'Predicted Rating': predicted_ratings[:10]
-                                    })
-                                    if true_ratings:
-                                        results_df['True Rating'] = true_ratings[:10]
+                                    # Add summary statistics
+                                    if true_ratings and len(true_ratings) == len(predicted_ratings):
+                                        st.write("### Summary Statistics")
+                                        stats_df = pd.DataFrame({
+                                            'Metric': ['Mean', 'Median', 'Std Dev', 'Min', 'Max'],
+                                            'True Ratings': [
+                                                np.mean(true_ratings),
+                                                np.median(true_ratings),
+                                                np.std(true_ratings),
+                                                np.min(true_ratings),
+                                                np.max(true_ratings)
+                                            ],
+                                            'Predicted Ratings': [
+                                                np.mean(predicted_ratings),
+                                                np.median(predicted_ratings),
+                                                np.std(predicted_ratings),
+                                                np.min(predicted_ratings),
+                                                np.max(predicted_ratings)
+                                            ]
+                                        })
+                                        stats_df = stats_df.round(2)
+                                        st.dataframe(stats_df)
 
-                                    st.write("Sample Results:")
-                                    st.dataframe(results_df)
-                            else:
-                                st.warning("Please execute preprocessing first.")
+                                # Add download button for full results
+                                full_results_df = pd.DataFrame({
+                                    'Text': texts,
+                                    'Predicted Rating': predicted_ratings
+                                })
+                                if true_ratings:
+                                    full_results_df['True Rating'] = true_ratings
+
+                                csv = full_results_df.to_csv(index=False)
+                                st.download_button(
+                                    label="Download Full Results CSV",
+                                    data=csv,
+                                    file_name="sentiment_analysis_results.csv",
+                                    mime="text/csv"
+                                )
+
+                        except Exception as e:
+                            st.error(f"Error during sentiment analysis: {str(e)}")
+                            st.error(
+                                "Please make sure you have enough memory and the correct dependencies installed.")
+
+                except Exception as e:
+                    st.error(f"Error loading sentiment model: {str(e)}")
+                    st.error(
+                        "Please make sure you have the required model files and dependencies installed.")
